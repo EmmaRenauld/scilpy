@@ -6,12 +6,15 @@ Local streamline HARDI tractography.
 The tracking direction is chosen in the aperture cone defined by the
 previous tracking direction and the angular constraint.
 
+Input can be HARDI (the spherical function SF) or
+previously computed peaks (from HARDI or from DTI).
+
 Algo 'eudx': the peak from the spherical function (SF) most closely aligned
 to the previous direction.
 Algo 'det': the maxima of the spherical function (SF) the most closely aligned
 to the previous direction.
 Algo 'prob': a direction drawn from the empirical distribution function defined
-from the SF.
+from the SF. Can't be used with --peaks.
 """
 
 import argparse
@@ -47,9 +50,6 @@ def _build_arg_parser():
         formatter_class=argparse.RawTextHelpFormatter)
 
     p._optionals.title = 'Generic options'
-    p.add_argument('in_sh',
-                   help='Spherical harmonic file. \n'
-                        '(isotropic resolution, nifti, see --basis).')
     p.add_argument('in_seed',
                    help='Seeding mask (isotropic resolution, nifti).')
     p.add_argument('in_mask',
@@ -58,10 +58,17 @@ def _build_arg_parser():
     p.add_argument('out_tractogram',
                    help='Tractogram output file (must be trk or tck).')
 
+    in_group = p.add_mutually_exclusive_group(required=True)
+    in_group.add_argument('--in_sh',
+                          help='Spherical harmonic file. \n'
+                               '(isotropic resolution, nifti, see --basis).')
+    in_group.add_argument('--in_peaks',
+                          help='Peaks file (nifti).')
+
     track_g = p.add_argument_group('Tracking options')
     track_g.add_argument(
-        '--algo', default='prob', choices=['det', 'prob'],
-        help='Algorithm to use (must be "det" or "prob"). [%(default)s]')
+        '--algo', default='prob', choices=['det', 'prob', 'eudx'],
+        help='Algorithm to use (must be "det", "prob" or "eux"). [%(default)s]')
     track_g.add_argument(
         '--step', dest='step_size', type=float, default=0.5,
         help='Step size in mm. [%(default)s]')
@@ -119,42 +126,55 @@ def _build_arg_parser():
 
 
 def _get_direction_getter(args, mask_data):
+    """
+    Creates a DirectionGetter for Dipy use. The type of direction
+    getter depends on the algo choice and input file choice.
+    """
     sh_data = nib.load(args.in_sh).get_fdata(dtype=np.float32)
     sphere = HemiSphere.from_sphere(get_sphere(args.sphere))
     theta = get_theta(args.theta, args.algo)
 
-    if args.algo in ['det', 'prob']:
-        if args.algo == 'det':
-            dg_class = DeterministicMaximumDirectionGetter
-        else:
-            dg_class = ProbabilisticDirectionGetter
-        return dg_class.from_shcoeff(
-            shcoeff=sh_data, max_angle=theta, sphere=sphere,
-            basis_type=args.sh_basis,
-            relative_peak_threshold=args.sf_threshold)
+    if args.in_sh:
+        sh_data = nib.load(args.in_sh).get_fdata()
 
-    # Code for type EUDX. We don't use peaks_from_model
-    # because we want the peaks from the provided sh.
-    sh_shape_3d = sh_data.shape[:-1]
-    npeaks = 5
-    peak_dirs = np.zeros((sh_shape_3d + (npeaks, 3)))
-    peak_values = np.zeros((sh_shape_3d + (npeaks, )))
-    peak_indices = np.full((sh_shape_3d + (npeaks, )), -1, dtype='int')
-    b_matrix = get_b_matrix(
-        find_order_from_nb_coeff(sh_data), sphere, args.sh_basis)
+        if args.algo in ['det', 'prob']:
+            if args.algo == 'det':
+                dg_class = DeterministicMaximumDirectionGetter
+            else:
+                dg_class = ProbabilisticDirectionGetter
+            return dg_class.from_shcoeff(
+                shcoeff=sh_data, max_angle=theta, sphere=sphere,
+                basis_type=args.sh_basis,
+                relative_peak_threshold=args.sf_threshold)
 
-    for idx in np.ndindex(sh_shape_3d):
-        if not mask_data[idx]:
-            continue
+        # else: args.algo == EUDX
+        # Preparing the peaks.
+        sh_shape_3d = sh_data.shape[:-1]
+        npeaks = 5
+        peak_dirs = np.zeros((sh_shape_3d + (npeaks, 3)))
+        peak_values = np.zeros((sh_shape_3d + (npeaks, )))
+        peak_indices = np.full((sh_shape_3d + (npeaks, )), -1, dtype='int')
+        b_matrix = get_b_matrix(
+            find_order_from_nb_coeff(sh_data), sphere, args.sh_basis)
 
-        directions, values, indices = get_maximas(
-            sh_data[idx], sphere, b_matrix, args.sf_threshold, 0)
-        if values.shape[0] != 0:
-            n = min(npeaks, values.shape[0])
-            peak_dirs[idx][:n] = directions[:n]
-            peak_values[idx][:n] = values[:n]
-            peak_indices[idx][:n] = indices[:n]
+        for idx in np.ndindex(sh_shape_3d):
+            if not mask_data[idx]:
+                continue
 
+            directions, values, indices = get_maximas(
+                sh_data[idx], sphere, b_matrix, args.sf_threshold, 0)
+            if values.shape[0] != 0:
+                n = min(npeaks, values.shape[0])
+                peak_dirs[idx][:n] = directions[:n]
+                peak_values[idx][:n] = values[:n]
+                peak_indices[idx][:n] = indices[:n]
+    else:
+        peaks_data = nib.load(args.in_peaks).get_fdata()
+        peaks_dir = 1
+        peaks_value = 1
+        peaks_indices = 1
+
+    # Either SH+EUDX or Peaks+det:
     dg = PeaksAndMetrics()
     dg.sphere = sphere
     dg.peak_dirs = peak_dirs
@@ -172,13 +192,22 @@ def main():
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG)
 
-    assert_inputs_exist(parser, [args.in_sh, args.in_seed, args.in_mask])
+    # Check inputs
+    if args.in_peaks:
+        if args.algo != 'det':
+            raise ValueError("You can only use peaks with deterministic "
+                             "tracking!")
+        in_file=args.in_peaks
+    else:
+        in_file=args.in_sh
+    assert_inputs_exist(parser, [in_file, args.in_seed, args.in_mask])
     assert_outputs_exist(parser, args, args.out_tractogram)
 
-    if not nib.streamlines.is_supported(args.out_tractogram):
+    if not nib.streamlines.is_supported(args.output_file):
         parser.error('Invalid output streamline file format (must be trk or ' +
                      'tck): {0}'.format(args.out_tractogram))
 
+    # Check options
     if not args.min_length > 0:
         parser.error('minL must be > 0, {}mm was provided.'
                      .format(args.min_length))
@@ -200,18 +229,6 @@ def main():
     if args.nt and args.nt <= 0:
         parser.error('Total number of seeds must be > 0.')
 
-    mask_img = nib.load(args.in_mask)
-    mask_data = get_data_as_mask(mask_img, dtype=np.bool)
-
-    # Make sure the mask is isotropic. Else, the strategy used
-    # when providing information to dipy (i.e. working as if in voxel space)
-    # will not yield correct results.
-    fodf_sh_img = nib.load(args.in_sh)
-    if not np.allclose(np.mean(fodf_sh_img.header.get_zooms()[:3]),
-                       fodf_sh_img.header.get_zooms()[0], atol=1.e-3):
-        parser.error(
-            'SH file is not isotropic. Tracking cannot be ran robustly.')
-
     if args.npv:
         nb_seeds = args.npv
         seed_per_vox = True
@@ -222,8 +239,23 @@ def main():
         nb_seeds = 1
         seed_per_vox = True
 
-    voxel_size = fodf_sh_img.header.get_zooms()[0]
+    # Load mask
+    mask_img = nib.load(args.in_mask)
+    mask_data = get_data_as_mask(mask_img, dtype=np.bool)
+
+    # Find voxels infos from header
+    header = nib.load(in_file).header
+    # Make sure the data is isotropic. Else, the strategy used
+    # when providing information to dipy (i.e. working as if in voxel space)
+    # will not yield correct results.
+    if not np.allclose(np.mean(header.get_zooms()[:3]),
+                       header.get_zooms()[0], atol=1.e-3):
+        parser.error(
+            'Input file is not isotropic. Tracking cannot be ran robustly.')
+    voxel_size = header.get_zooms()[0]
     vox_step_size = args.step_size / voxel_size
+
+    # Create seeds
     seed_img = nib.load(args.in_seed)
     seeds = track_utils.random_seeds_from_mask(
         seed_img.get_fdata(dtype=np.float32),
