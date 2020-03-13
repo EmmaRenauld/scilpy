@@ -6,15 +6,15 @@ Local streamline HARDI tractography.
 The tracking direction is chosen in the aperture cone defined by the
 previous tracking direction and the angular constraint.
 
-Input can be HARDI (the spherical function SF) or
-previously computed peaks (from HARDI or from DTI).
+Input can be the SH (spherical harmonics) or previously computed peaks
+(from HARDI or from DTI).
 
 Algo 'eudx': the peak from the spherical function (SF) most closely aligned
-to the previous direction.
+to the previous direction. Can't be used with --peaks.
 Algo 'det': the maxima of the spherical function (SF) the most closely aligned
 to the previous direction.
 Algo 'prob': a direction drawn from the empirical distribution function defined
-from the SF. Can't be used with --peaks.
+from the SF.
 """
 
 import argparse
@@ -43,6 +43,26 @@ from scilpy.io.utils import (add_overwrite_arg, add_sh_basis_args,
                              assert_inputs_exist, assert_outputs_exist)
 from scilpy.tracking.tools import get_theta
 
+# Note. Previous options that are not offered anymore:
+# --curvature. (not the same computation as theta)
+# --ns: Total number of streamlines to create.
+# --skip N to skip the N first generated seeds
+# --sfthres_init for the initial direction
+# --maxL_no_dir Maximum length without valid direction
+# --interpolation choice for the mask
+# --rk_order: Runge-Kutta order for the step
+# --single_direction to track only in one (random) direction
+# --processes and associated --load_data
+
+# Note. Summary of the direction getter:
+# sh and prob: ProbabilisticDirectionGetter
+# sh and det: DeterministicMaximumDirectionGetter
+# sh and eudx: PeaksAndMetrics  (which is a EuDXDirectionGetter)
+# peaks and prob:
+# peaks and det:
+# peaks and eudx:
+
+
 
 def _build_arg_parser():
     p = argparse.ArgumentParser(
@@ -63,7 +83,7 @@ def _build_arg_parser():
                           help='Spherical harmonic file. \n'
                                '(isotropic resolution, nifti, see --basis).')
     in_group.add_argument('--in_peaks',
-                          help='Peaks file (nifti).')
+                          help='Peaks file (isotropic resolution, nifti).')
 
     track_g = p.add_argument_group('Tracking options')
     track_g.add_argument(
@@ -125,7 +145,25 @@ def _build_arg_parser():
     return p
 
 
-def _get_direction_getter(args, mask_data):
+def _get_direction_getter_from_peaks(args, mask_data):
+    """
+    Creates a DirectionGetter for Dipy use. The type of direction
+    getter depends on the algo choice and input file choice.
+    """
+    peaks_data = nib.load(args.in_peaks).get_fdata()
+    # Note:
+    # shape=(X,Y,Z,3*N), ex, (X,Y,Z,x1,y1,z1,x2,y2,z2)
+
+    peaks_data = arrange_with(mask_data)
+
+    peak_dirs, peak_values, peak_indices = get_peaks_info(peaks_data)
+
+    dg = _get_direction_getter_from_peaks(args, sphere, peak_dirs,
+                                          peak_values, peak_indices, theta)
+    return dg
+
+
+def _get_direction_getter_from_sh(args, mask_data):
     """
     Creates a DirectionGetter for Dipy use. The type of direction
     getter depends on the algo choice and input file choice.
@@ -134,47 +172,42 @@ def _get_direction_getter(args, mask_data):
     sphere = HemiSphere.from_sphere(get_sphere(args.sphere))
     theta = get_theta(args.theta, args.algo)
 
-    if args.in_sh:
-        sh_data = nib.load(args.in_sh).get_fdata()
+    if args.algo in ['det', 'prob']:
+        if args.algo == 'det':
+            dg_class = DeterministicMaximumDirectionGetter
+        else:
+            dg_class = ProbabilisticDirectionGetter
+        return dg_class.from_shcoeff(
+            shcoeff=sh_data, max_angle=theta, sphere=sphere,
+            basis_type=args.sh_basis,
+            relative_peak_threshold=args.sf_threshold)
 
-        if args.algo in ['det', 'prob']:
-            if args.algo == 'det':
-                dg_class = DeterministicMaximumDirectionGetter
-            else:
-                dg_class = ProbabilisticDirectionGetter
-            return dg_class.from_shcoeff(
-                shcoeff=sh_data, max_angle=theta, sphere=sphere,
-                basis_type=args.sh_basis,
-                relative_peak_threshold=args.sf_threshold)
+    # else:
+    # Code for type EUDX. We don't use peaks_from_model
+    # because we want the peaks from the provided sh.
 
-        # else: args.algo == EUDX
-        # Preparing the peaks.
-        sh_shape_3d = sh_data.shape[:-1]
-        npeaks = 5
-        peak_dirs = np.zeros((sh_shape_3d + (npeaks, 3)))
-        peak_values = np.zeros((sh_shape_3d + (npeaks, )))
-        peak_indices = np.full((sh_shape_3d + (npeaks, )), -1, dtype='int')
-        b_matrix = get_b_matrix(
-            find_order_from_nb_coeff(sh_data), sphere, args.sh_basis)
+    # Preparing the peaks.
+    sh_shape_3d = sh_data.shape[:-1]
+    npeaks = 5
+    peak_dirs = np.zeros((sh_shape_3d + (npeaks, 3)))
+    peak_values = np.zeros((sh_shape_3d + (npeaks, )))
+    peak_indices = np.full((sh_shape_3d + (npeaks, )), -1, dtype='int')
+    b_matrix = get_b_matrix(
+        find_order_from_nb_coeff(sh_data), sphere, args.sh_basis)
 
-        for idx in np.ndindex(sh_shape_3d):
-            if not mask_data[idx]:
-                continue
+    for idx in np.ndindex(sh_shape_3d):
+        if not mask_data[idx]:
+            continue
 
-            directions, values, indices = get_maximas(
-                sh_data[idx], sphere, b_matrix, args.sf_threshold, 0)
-            if values.shape[0] != 0:
-                n = min(npeaks, values.shape[0])
-                peak_dirs[idx][:n] = directions[:n]
-                peak_values[idx][:n] = values[:n]
-                peak_indices[idx][:n] = indices[:n]
-    else:
-        peaks_data = nib.load(args.in_peaks).get_fdata()
-        peaks_dir = 1
-        peaks_value = 1
-        peaks_indices = 1
+        directions, values, indices = get_maximas(
+            sh_data[idx], sphere, b_matrix, args.sf_threshold, 0)
+        if values.shape[0] != 0:
+            n = min(npeaks, values.shape[0])
+            peak_dirs[idx][:n] = directions[:n]
+            peak_values[idx][:n] = values[:n]
+            peak_indices[idx][:n] = indices[:n]
 
-    # Either SH+EUDX or Peaks+det:
+    # Preparing the EUDX direction getter
     dg = PeaksAndMetrics()
     dg.sphere = sphere
     dg.peak_dirs = peak_dirs
@@ -192,18 +225,17 @@ def main():
     if args.verbose:
         logging.basicConfig(level=logging.DEBUG)
 
-    # Check inputs
+    # Check inputs and outputs
     if args.in_peaks:
-        if args.algo != 'det':
-            raise ValueError("You can only use peaks with deterministic "
-                             "tracking!")
+        if args.algo == 'eudx':
+            raise ValueError("You can't use peaks with EUDX tracking!")
         in_file=args.in_peaks
     else:
         in_file=args.in_sh
     assert_inputs_exist(parser, [in_file, args.in_seed, args.in_mask])
     assert_outputs_exist(parser, args, args.out_tractogram)
 
-    if not nib.streamlines.is_supported(args.output_file):
+    if not nib.streamlines.is_supported(args.out_tractogram):
         parser.error('Invalid output streamline file format (must be trk or ' +
                      'tck): {0}'.format(args.out_tractogram))
 
@@ -245,14 +277,17 @@ def main():
 
     # Find voxels infos from header
     header = nib.load(in_file).header
+    voxel_size = header.get_zooms()[0]
+
     # Make sure the data is isotropic. Else, the strategy used
     # when providing information to dipy (i.e. working as if in voxel space)
     # will not yield correct results.
     if not np.allclose(np.mean(header.get_zooms()[:3]),
-                       header.get_zooms()[0], atol=1.e-3):
+                       voxel_size, atol=1.e-3):
         parser.error(
             'Input file is not isotropic. Tracking cannot be ran robustly.')
-    voxel_size = header.get_zooms()[0]
+
+    # Step size
     vox_step_size = args.step_size / voxel_size
 
     # Create seeds
@@ -266,15 +301,19 @@ def main():
 
     # Tracking is performed in voxel space
     max_steps = int(args.max_length / args.step_size) + 1
-    streamlines = LocalTracking(
-        _get_direction_getter(args, mask_data),
-        BinaryStoppingCriterion(mask_data),
-        seeds, np.eye(4),
-        step_size=vox_step_size, max_cross=1,
-        maxlen=max_steps,
-        fixedstep=True, return_all=True,
-        random_seed=args.seed,
-        save_seeds=args.save_seeds)
+    if args.in_sh:
+        streamlines = LocalTracking(
+            _get_direction_getter_from_sh(args, mask_data),
+            BinaryStoppingCriterion(mask_data),
+            seeds, np.eye(4),
+            step_size=vox_step_size, max_cross=1,
+            maxlen=max_steps,
+            fixedstep=True, return_all=True,
+            random_seed=args.seed,
+            save_seeds=args.save_seeds)
+    else:
+        # toDo
+        raise NotImplementedError
 
     scaled_min_length = args.min_length / voxel_size
     scaled_max_length = args.max_length / voxel_size
