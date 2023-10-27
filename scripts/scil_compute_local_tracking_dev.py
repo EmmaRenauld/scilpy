@@ -124,7 +124,7 @@ def _build_arg_parser():
     #  witout option. This should be investigated.
     track_g.add_argument(
         "--no_seed_displacement", action="store_true",
-        help="By default, seed position is moved randomly inside the voxel. "
+        help="By default, seed position is moved randomly inside the voxel.\n"
              "Use this option to have all seeds centered at the middle of the "
              "voxel.")
 
