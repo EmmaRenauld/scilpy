@@ -20,7 +20,7 @@ class SeedGenerator:
     """
     def __init__(self, data, voxres,
                  space=Space('vox'), origin=Origin('center'),
-                 randomize_positions=True):
+                 n_repeats=1):
         """
         Parameters
         ----------
@@ -29,12 +29,12 @@ class SeedGenerator:
             to find all voxels with values > 0, but will not be kept in memory.
         voxres: np.ndarray(3,)
             The pixel resolution, ex, using img.header.get_zooms()[:3].
-        randomize_positions: bool
-            By default, seed position is moved randomly inside the voxel. Set to
-            False to have all seeds centered at the middle of the voxel.
+        n_repeats: int
+            Number of times a same seed position is returned.
         """
         self.voxres = voxres
-        self.randomize_positions = randomize_positions
+        self.previous_offset = None
+        self.n_repeats = n_repeats
 
         self.origin = origin
         self.space = space
@@ -73,18 +73,21 @@ class SeedGenerator:
             return []
 
         # Voxel selection from the seeding mask
-        ind = which_seed % len_seeds
+        ind = (which_seed // self.n_repeats) % len_seeds
         x, y, z = self.seeds_vox[indices[ind]]
 
-        if self.randomize_positions:
+        if which_seed % self.n_repeats == 0 or self.previous_offset is None:
             # Subvoxel initial positioning. Right now x, y, z are in vox space,
             # origin=corner, so between 0 and 1.
             r_x, r_y, r_z = random_generator.uniform(0, 1, size=3)
+            self.previous_offset = (r_x, r_y, r_z)
 
-            # Moving inside the voxel
-            x += r_x
-            y += r_y
-            z += r_z
+        r_x, r_y, r_z = self.previous_offset
+
+        # Moving inside the voxel
+        x += r_x
+        y += r_y
+        z += r_z
 
         if self.origin == Origin('center'):
             # Bound [0, 0, 0] is now [-0.5, -0.5, -0.5]
