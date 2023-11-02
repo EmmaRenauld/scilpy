@@ -125,8 +125,8 @@ def _build_arg_parser():
     track_g.add_argument(
         "--n_repeats_per_seed", type=int, default=1,
         help="By default, each seed position is used only once. This option\n"
-             "allows for tracking for the exact same seed n_repeats_per_seed\n"
-             "times. [%(default)s]")
+             "allows for tracking from the exact same seed n_repeats_per_seed"
+             "\ntimes. [%(default)s]")
 
     add_seeding_options(p)
 
