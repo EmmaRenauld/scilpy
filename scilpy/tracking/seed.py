@@ -128,19 +128,38 @@ class SeedGenerator:
             return []
 
         # Voxel selection from the seeding mask
-        inds = which_seeds % len_seeds
+        # Same seed is re-used n_repeats times
+        inds = (which_seeds // self.n_repeats) % len_seeds
 
-        # Sub-voxel initial positioning
         # Prepare sub-voxel random movement now (faster out of loop)
+        # Total number of offsets to precompute
         n = len(which_seeds)
-        if self.randomize_positions:
-            r_x = random_generator.uniform(0, 1, size=n)
-            r_y = random_generator.uniform(0, 1, size=n)
-            r_z = random_generator.uniform(0, 1, size=n)
-        else:
-            r_x = np.zeros(n)
-            r_y = np.zeros(n)
-            r_z = np.zeros(n)
+        r_x = np.zeros((n,))
+        r_y = np.zeros((n,))
+        r_z = np.zeros((n,))
+
+        # The number of times we need to repeat the last returned seed
+        n_previous = (self.n_repeats - which_seeds[0] % self.n_repeats)\
+            % self.n_repeats
+        if n_previous > 0 and self.previous_offset is not None:
+            r_x[:n_previous] = self.previous_offset[0]
+            r_y[:n_previous] = self.previous_offset[1]
+            r_z[:n_previous] = self.previous_offset[2]
+
+        # The number of new random offsets to generate
+        n_rand = int(np.ceil(float(n - n_previous) / self.n_repeats))
+        r_x[n_previous:] = np.repeat(
+            random_generator.uniform(0, 1, size=(n_rand)),
+            self.n_repeats)[:(n - n_previous)]
+        r_y[n_previous:] = np.repeat(
+            random_generator.uniform(0, 1, size=(n_rand)),
+            self.n_repeats)[:(n - n_previous)]
+        r_z[n_previous:] = np.repeat(
+            random_generator.uniform(0, 1, size=(n_rand)),
+            self.n_repeats)[:(n - n_previous)]
+
+        # Save previous offset for next batch
+        self.previous_offset = (r_x[-1], r_y[-1], r_z[-1])
 
         seeds = []
         # Looping. toDo, see if can be done faster.
