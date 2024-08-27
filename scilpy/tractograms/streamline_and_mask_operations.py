@@ -114,9 +114,7 @@ def get_head_tail_density_maps(sft, point_to_select=1, to_millimeters=False):
     return endpoints_map_head, endpoints_map_tail
 
 
-def _trim_streamline_in_mask(
-    idx, streamline, pts_to_idx, mask
-):
+def _trim_streamline_in_mask(idx, streamline, pts_to_idx, mask):
     """ Trim streamlines to the bounding box or a binary mask. More
     streamlines may be generated if the original streamline goes in and out
     of the mask.
@@ -163,11 +161,9 @@ def _trim_streamline_in_mask(
     return new_strmls
 
 
-def _trim_streamline_endpoints_in_mask(
-    idx, streamline, pts_to_idx, mask
-):
-    """ Trim a streamline to remove its endpoints if they are outside of
-    a mask. This function does not generate new streamlines.
+def _trim_streamline_endpoints_in_mask(idx, streamline, pts_to_idx, mask):
+    """ Trim a streamline to remove its endpoints if they are outside a mask.
+    This function does not generate new streamlines.
 
     Parameters
     ----------
@@ -207,9 +203,7 @@ def _trim_streamline_endpoints_in_mask(
     return [cut_strl]
 
 
-def _trim_streamline_in_mask_keep_longest(
-    idx, streamline, pts_to_idx, mask
-):
+def _trim_streamline_in_mask_keep_longest(idx, streamline, pts_to_idx, mask):
     """ Trim a streamline to keep the longest segment within a mask. This
     function does not generate new streamlines.
 
@@ -357,7 +351,9 @@ def cut_streamlines_between_labels(
         The two labels to cut between. If not provided, the two unique labels
         in the label map will be used.
     min_len: float
-        Minimum length from the resulting streamlines.
+        Minimum length from the resulting streamlines, in mm.
+    processes: int
+        Number of processes.
 
     Returns
     -------
@@ -482,7 +478,7 @@ def _get_longest_streamline_segment_in_roi(all_strl_indices):
     strl_indices_grad = np.gradient(all_strl_indices)
     split_pos = np.where(strl_indices_grad != 1)[0]
 
-    # Covers weird cases where there is only non consecutive indices
+    # Covers weird cases where there is only non-consecutive indices
     if len(strl_indices_grad) == len(split_pos) + 1:
         return [None]
 
