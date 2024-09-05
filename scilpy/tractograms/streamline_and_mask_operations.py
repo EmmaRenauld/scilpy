@@ -566,13 +566,16 @@ def compute_streamline_segment(orig_strl, inter_vox, in_vox_idx, out_vox_idx,
     orig_strl: np.ndarray
         The original streamline.
     inter_vox: np.ndarray
-        The intersection points of the streamline with the voxel grid.
+        The intersection points of the streamline with the voxel grid. They
+        can be obtained with scilpy.tractograms.uncompress.uncompress (the
+        indices).
     in_vox_idx: int
         The index of the voxel where the streamline enters.
     out_vox_idx: int
         The index of the voxel where the streamline exits.
     points_to_indices: np.ndarray
-        The indices of the voxels in the voxel grid.
+        The indices of the voxels in the voxel grid. They can be obtained with
+        scilpy.tractograms.uncompress.uncompress (the points_to_idx).
 
     Returns
     -------
@@ -586,8 +589,7 @@ def compute_streamline_segment(orig_strl, inter_vox, in_vox_idx, out_vox_idx,
 
     # Check if the ROI contains a real streamline point at
     # the beginning of the streamline
-    in_strl_point = _get_streamline_pt_index(points_to_indices,
-                                             in_vox_idx)
+    in_strl_point = _get_streamline_pt_index(points_to_indices, in_vox_idx)
 
     # If not, find the next real streamline point
     if in_strl_point is None:

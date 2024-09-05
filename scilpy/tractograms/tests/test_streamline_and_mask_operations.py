@@ -321,9 +321,19 @@ def test_cut_between_labels_streamlines_offset():
     assert np.allclose(cut_sft.streamlines._data, res.streamlines._data)
 
 
+def test_intersects_two_rois():
+
+
 def test_compute_streamline_segment():
-    """ Test the compute_streamline_segment function by cutting a
-    streamline between two rois.
+    """ Test the compute_streamline_segment function by cutting a streamline
+    between two ROIs.
+
+    This method is already used in most other methods tested here, but let's
+    showcase its usage.
+
+    We need the ROI information. It could be found in any method. Here, using the previous result.
+    the _intersects_two_rois method, used by
+    _cut_streamline_with_labels, used by cut_streamlines_between_labels.
     """
 
     sft, reference, _, head_tail_offset_rois, _ = _setup_files()
@@ -333,28 +343,42 @@ def test_compute_streamline_segment():
     one_sft = sft[0]
 
     # Split head and tail from mask
-    roi_data_1, roi_data_2 = split_mask_blobs_kmeans(
-        head_tail_offset_rois, nb_clusters=2)
+    roi_data_1, roi_data_2 = split_mask_blobs_kmeans(head_tail_offset_rois,
+                                                     nb_clusters=2)
+    print("roi_data_1", roi_data_1)
 
-    (indices, points_to_idx) = uncompress(one_sft.streamlines,
-                                          return_mapping=True)
-
+    # Using only the first streamline:
+    indices, points_to_idx = uncompress(one_sft.streamlines,
+                                        return_mapping=True)
     strl_indices = indices[0]
-    # Find the first and last "voxels" of the streamline that are in the
-    # ROIs
-    in_strl_idx, out_strl_idx = _intersects_two_rois(roi_data_1,
-                                                     roi_data_2,
+    points_to_indices = points_to_idx[0]
+    print("str_indices", strl_indices)
+    print("points_to_indices", points_to_indices)
+
+    # Find the first and last "voxels" of the streamline that are in the ROIs.
+    in_strl_idx, out_strl_idx = _intersects_two_rois(roi_data_1, roi_data_2,
                                                      strl_indices)
-    # If the streamline intersects both ROIs
-    if in_strl_idx is not None and out_strl_idx is not None:
-        points_to_indices = points_to_idx[0]
-        # Compute the new streamline by keeping only the segment between
-        # the two ROIs
-        res = compute_streamline_segment(one_sft.streamlines[0],
-                                         strl_indices,
-                                         in_strl_idx, out_strl_idx,
-                                         points_to_indices)
+
+    # (testing this)
+    in_strl_coord = strl_indices[in_strl_idx]
+    print("We found that the streamline enter???????", roi_data_1[in_strl_coord[0], in_strl_coord[1], in_strl_coord[2]])
+    assert roi_data_1[strl_indices[in_strl_idx]] > 0
+    assert roi_data_1[strl_indices[in_strl_idx - 1]] <= 0
+
+    print("in, out", in_strl_idx, out_strl_idx)
+
+    # Case 1. If the streamline intersects both ROIs.
+    assert in_strl_idx is not None and out_strl_idx is not None
+
+    # Compute a new streamline by keeping only the segment between the two ROIs
+    res = compute_streamline_segment(one_sft.streamlines[0], strl_indices,
+                                     in_strl_idx, out_strl_idx,
+                                     points_to_indices)
 
     # Streamline should be shorter than the original
     assert len(res) < len(one_sft.streamlines[0])
     assert len(res) == 105
+
+    # Case 2. No point exactly at the intersection.
+    assert in_strl_idx == 3  # Checking that our test data has not changed
+    assert False
