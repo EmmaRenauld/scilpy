@@ -195,3 +195,113 @@ def compute_connectivity_matrices_from_hdf5(
                 dps_keys.append(dps_key)
 
     return {(in_label, out_label): measures_to_return}, dps_keys
+
+
+def find_streamlines_with_connectivity(
+        streamlines, start_labels, end_labels, label1, label2=None):
+    """
+    Returns streamlines corresponding to a (label1, label2) or (label2, label1)
+    connection.
+
+    Parameters
+    ----------
+    streamlines: list of np arrays or list of tensors.
+        Streamlines, in vox space, corner origin.
+    start_labels: list[int]
+        The starting bloc for each streamline.
+    end_labels: list[int]
+        The ending bloc for each streamline.
+    label1: int
+        The bloc of interest, either as starting or finishing point.
+    label2: int, optional
+        The bloc of interest, either as starting or finishing point.
+        If label2 is None, then all connections (label1, Y) and (X, label1)
+        are found.
+    """
+    start_labels = np.asarray(start_labels)
+    end_labels = np.asarray(end_labels)
+
+    if label2 is None:
+        labels2 = np.unique(np.concatenate((start_labels[:], end_labels[:])))
+    else:
+        labels2 = [label2]
+
+    found = np.zeros(len(streamlines))
+    for label2 in labels2:
+        str_ind1 = np.logical_and(start_labels == label1,
+                                  end_labels == label2)
+        str_ind2 = np.logical_and(start_labels == label2,
+                                  end_labels == label1)
+        str_ind = np.logical_or(str_ind1, str_ind2)
+        found = np.logical_or(found, str_ind)
+
+    return [s for i, s in enumerate(streamlines) if found[i]]
+
+
+def compute_triu_connectivity_from_labels(streamlines, data_labels,
+                                          use_scilpy=False):
+    """
+    Compute a connectivity matrix.
+
+    Parameters
+    ----------
+    streamlines: list of np arrays or list of tensors.
+        Streamlines, in vox space, corner origin.
+    data_labels: np.ndarray
+        The loaded nifti image.
+    use_scilpy: bool
+        If True, uses scilpy's method:
+          'Strategy is to keep the longest streamline segment
+           connecting 2 regions. If the streamline crosses other gray
+           matter regions before reaching its final connected region,
+           the kept connection is still the longest. This is robust to
+           compressed streamlines.'
+        Else, uses simple computation from endpoints. Faster. Also, works with
+        incomplete parcellation.
+
+    Returns
+    -------
+    matrix: np.ndarray
+        With use_scilpy: shape (nb_labels + 1, nb_labels + 1)
+        (last label is "Not Found")
+        Else, shape (nb_labels, nb_labels)
+    labels: List
+        The list of labels
+    start_labels: List
+        For each streamline, the label at starting point.
+    end_labels: List
+        For each streamline, the label at ending point.
+    """
+    real_labels = list(np.sort(np.unique(data_labels)))
+    nb_labels = len(real_labels)
+    logging.debug("Computing connectivity matrix for {} labels."
+                  .format(nb_labels))
+
+    if use_scilpy:
+        matrix = np.zeros((nb_labels + 1, nb_labels + 1), dtype=int)
+    else:
+        matrix = np.zeros((nb_labels, nb_labels), dtype=int)
+
+    start_labels = []
+    end_labels = []
+
+    for s in streamlines:
+        # Vox space, corner origin
+        # = we can get the nearest neighbor easily.
+        # Coord 0 = voxel 0. Coord 0.9 = voxel 0. Coord 1 = voxel 1.
+        start = real_labels.index(
+            data_labels[tuple(np.floor(s[0, :]).astype(int))])
+        end = real_labels.index(
+            data_labels[tuple(np.floor(s[-1, :]).astype(int))])
+
+        start_labels.append(start)
+        end_labels.append(end)
+
+        matrix[start, end] += 1
+        if start != end:
+            matrix[end, start] += 1
+
+    matrix = np.triu(matrix)
+    assert matrix.sum() == len(streamlines)
+
+    return matrix, real_labels, start_labels, end_labels
