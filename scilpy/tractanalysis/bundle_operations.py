@@ -12,7 +12,7 @@ from scipy.spatial import cKDTree
 from sklearn.cluster import KMeans
 
 from scilpy.tractograms.streamline_and_mask_operations import \
-    get_endpoints_density_map
+    get_endpoints_density_map, get_head_tail_density_maps
 from scilpy.tractograms.streamline_operations import \
     resample_streamlines_num_points, get_streamlines_bounding_box
 
@@ -343,3 +343,36 @@ def remove_outliers_qb(streamlines, threshold, nb_points=12, nb_samplings=30,
 
     return outliers_ids, inliers_ids
 
+
+def find_endpoints_head_tail(sft, distance, unit, binary):
+    """
+    Computes the maps of the head endpoints and tail endpoints of a bundle.
+
+    Parameters
+    ----------
+    sft: StatefulTractogram
+        The bundle
+    distance: int
+        The distance at each extremity that is considerend an "endpoint".
+    unit: str
+        The unit of the distance, either "mm" or "points"
+    binary: bool
+        If true, returns binary maps. Else, returns the streamline count.
+    """
+    sft.to_vox()
+    sft.to_corner()
+
+    # Distance and unit to consider at the extremities of the streamlines
+    nb_points = distance
+    to_mm = unit == 'mm'
+
+    # Compute the density maps
+    endpoints_map_head, endpoints_map_tail = \
+        get_head_tail_density_maps(sft, nb_points, to_millimeters=to_mm)
+
+    # Convert streamline density to binary mask
+    if binary:
+        endpoints_map_head = (endpoints_map_head > 0).astype(np.int16)
+        endpoints_map_tail = (endpoints_map_tail > 0).astype(np.int16)
+
+    return endpoints_map_head, endpoints_map_tail

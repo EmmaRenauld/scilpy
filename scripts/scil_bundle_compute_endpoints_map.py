@@ -2,15 +2,15 @@
 # -*- coding: utf-8 -*-
 
 """
-Computes the endpoint map of a bundle. The endpoint map is simply a count of
+Computes the endpoints map of a bundle. The endpoints map is a count of
 the number of streamlines that start or end in each voxel.
 
-The idea is to estimate the cortical area affected by the bundle (assuming
+Hint: Helps to estimate the cortical area covered by the bundle (assuming
 streamlines start/end in the cortex).
 
-Note: If the streamlines are not ordered the head/tail are random and not
+Note: If the streamlines are not ordered, the head/tail are random and not
 really two coherent groups. Use the following script to order streamlines:
-scil_tractogram_uniformize_endpoints.py
+scil_bundle_uniformize_endpoints.py
 
 Formerly: scil_compute_endpoints_map.py
 """
@@ -30,6 +30,7 @@ from scilpy.io.utils import (add_json_args,
                              add_reference_arg,
                              assert_inputs_exist,
                              assert_outputs_exist)
+from scilpy.tractanalysis.bundle_operations import find_endpoints_head_tail
 from scilpy.tractograms.streamline_and_mask_operations import \
     get_head_tail_density_maps
 
@@ -52,9 +53,12 @@ def _build_arg_parser():
                    help="Save outputs as a binary mask instead of a heat map.")
 
     distance_g = p.add_argument_group(title='Distance options')
-    distance_g.add_argument('--distance', type=int, default=1,
-                            help="Distance to consider at the extremities "
-                            "of the streamlines. [%(default)s]")
+    distance_g.add_argument(
+        '--distance', type=int, default=1,
+        help="Distance to consider at the extremities of the streamlines. \n"
+             "Ex: if --unit is points, a value of 1 means that the first and "
+             "last \npoints of the streamlines only are considered."
+             "[%(default)s]")
     distance_g.add_argument('--unit', type=str, choices=['points', 'mm'],
                             default='points',
                             help='Unit of the distance. [%(default)s]')
@@ -73,43 +77,34 @@ def main():
     swap = args.swap
     logging.getLogger().setLevel(logging.getLevelName(args.verbose))
 
+    # Verificatons
     assert_inputs_exist(parser, args.in_bundle, args.reference)
     assert_outputs_exist(parser, args, [args.endpoints_map_head,
                                         args.endpoints_map_tail])
 
+    # Swap head and tail if necessary
+    if swap:
+        tmp = args.endpoints_map_head
+        args.endpoints_map_head = args.endpoints_map_tail
+        args.endpoints_map_tail = tmp
+
+    # Loading
     sft = load_tractogram_with_reference(parser, args, args.in_bundle)
-    sft.to_vox()
-    sft.to_corner()
     if len(sft.streamlines) == 0:
         logging.warning('Empty bundle file {}. Skipping'.format(args.bundle))
         return
 
-    transfo, *_ = sft.space_attributes
+    # Processing
+    endpoints_map_head, endpoints_map_tail = find_endpoints_head_tail(sft)
 
-    head_name = args.endpoints_map_head
-    tail_name = args.endpoints_map_tail
+    # Saving
+    transfo, *_ = sft.space_attribute
+    nib.save(nib.Nifti1Image(endpoints_map_head, transfo),
+             args.endpoints_map_head)
+    nib.save(nib.Nifti1Image(endpoints_map_tail, transfo),
+             args.endpoints_map_tail)
 
-    # Swap head and tail if necessary
-    if swap:
-        head_name = args.endpoints_map_tail
-        tail_name = args.endpoints_map_head
-
-    # Distance and unit to consider at the extremities of the streamlines
-    nb_points = args.distance
-    to_mm = args.unit == 'mm'
-
-    # Compute the density maps
-    endpoints_map_head, endpoints_map_tail = \
-        get_head_tail_density_maps(sft, nb_points, to_millimeters=to_mm)
-
-    # Convert streamline density to binary mask
-    if args.binary:
-        endpoints_map_head = (endpoints_map_head > 0).astype(np.int16)
-        endpoints_map_tail = (endpoints_map_tail > 0).astype(np.int16)
-
-    nib.save(nib.Nifti1Image(endpoints_map_head, transfo), head_name)
-    nib.save(nib.Nifti1Image(endpoints_map_tail, transfo), tail_name)
-
+    # Printing statistics
     bundle_name, _ = os.path.splitext(os.path.basename(args.in_bundle))
     bundle_name_head = bundle_name + '_head'
     bundle_name_tail = bundle_name + '_tail'
