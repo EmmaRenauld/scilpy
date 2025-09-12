@@ -77,6 +77,7 @@ def main():
     transformation, dimensions, _, _ = sft.space_attributes
 
     # Processing
+    logging.info("Computing density map...")
     if args.endpoints_only:
         streamline_count = get_endpoints_density_map(sft)
     else:
@@ -90,6 +91,7 @@ def main():
             dtype_to_use = np.uint8
         streamline_count[streamline_count > 0] = args.binary
 
+    logging.info("Saving density map {}".format(args.out_img))
     img = nib.Nifti1Image(streamline_count.astype(dtype_to_use),
                           transformation)
     nib.save(img, args.out_img)

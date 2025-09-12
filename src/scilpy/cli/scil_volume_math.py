@@ -142,6 +142,7 @@ def main():
     if args.exclude_background:
         output_data[mask == 0] = 0
 
+    logging.info("Saving output image {}".format(args.out_image))
     new_img = nib.Nifti1Image(output_data, ref_img.affine,
                               header=ref_img.header)
     nib.save(new_img, args.out_image)
