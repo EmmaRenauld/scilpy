@@ -1,7 +1,7 @@
 .. _page_population_template:
 
-Creating a WM bundle population template
-========================================
+Creating a bundle template from a chosen population
+===================================================
 
 Scilpy scripts enable users to create a WM bundle population template, such as described in figure 3 in our upcoming paper. Such a pipeline includes:
 
@@ -24,7 +24,9 @@ Preparing data for this tutorial
 ********************************
 
 Let's download data, you can find it here: ?. The organization, for each subject, is:
-::
+:
+
+.. code-block:: bash
 
     ├── input_data
     │   ├── mni_masked.nii.gz
