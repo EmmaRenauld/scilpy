@@ -89,5 +89,5 @@ jobs:
             echo "Running $script..." 
             
             # We made sure that all our scripts receive as input the path to WB-common 
-            bash "$script" $input_path $output_folder
+            bash "$here/$script" $input_path $output_folder
           done
