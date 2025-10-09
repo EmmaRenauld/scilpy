@@ -6,11 +6,10 @@ set -euo pipefail  # Will fail on error
 #    1) Load the input data
 #       https://scilpy.readthedocs.io/en/latest/documentation/getting_started.html
 #    2) Call this script with
-#    --->   bash tractogram_math.sh  path/to/your/data  path/to/save/outputs
+#    --->   bash tractogram_math.sh  path/to/your/data
+#    Note that outputs will be saved in the current directory.
 # ==============
 in_folder=$1
-out_folder=$2
-
 
 # Let's use two different tractograms available in the data:
 tractogram1=$in_folder/sub-01/sub-01__cst_L_part1.trk

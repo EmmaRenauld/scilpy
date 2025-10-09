@@ -88,6 +88,6 @@ jobs:
       
             echo "Running $script..." 
             
-            # We made sure that all our scripts receive as input the path to WB-common 
-            bash "$here/$script" $input_path $output_folder
+            # We made sure that all our scripts receive as input the path to tutorial data
+            bash "$here/$script" $input_path
           done
